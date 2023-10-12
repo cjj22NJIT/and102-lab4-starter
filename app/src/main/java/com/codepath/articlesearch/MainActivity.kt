@@ -3,12 +3,15 @@ package com.codepath.articlesearch
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.codepath.articlesearch.databinding.ActivityMainBinding
 import com.codepath.asynchttpclient.AsyncHttpClient
 import com.codepath.asynchttpclient.callback.JsonHttpResponseHandler
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.Headers
 import org.json.JSONException
@@ -27,11 +30,12 @@ private const val ARTICLE_SEARCH_URL =
 class MainActivity : AppCompatActivity() {
     private lateinit var articlesRecyclerView: RecyclerView
     private lateinit var binding: ActivityMainBinding
-    private val articles = mutableListOf<Article>()
+    private val articles = mutableListOf<DisplayArticle>()
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         val view = binding.root
@@ -40,6 +44,23 @@ class MainActivity : AppCompatActivity() {
         articlesRecyclerView = findViewById(R.id.articles)
         val articleAdapter = ArticleAdapter(this, articles)
         articlesRecyclerView.adapter = articleAdapter
+
+        lifecycleScope.launch {
+            (application as ArticleApplication).db.articleDao().getAll().collect { databaseList ->
+                databaseList.map { entity ->
+                    DisplayArticle(
+                        entity.headline,
+                        entity.articleAbstract,
+                        entity.byline,
+                        entity.mediaImageUrl
+                    )
+                }.also { mappedList ->
+                    articles.clear()
+                    articles.addAll(mappedList)
+                    articleAdapter.notifyDataSetChanged()
+                }
+            }
+        }
 
         articlesRecyclerView.layoutManager = LinearLayoutManager(this).also {
             val dividerItemDecoration = DividerItemDecoration(this, it.orientation)
@@ -67,11 +88,22 @@ class MainActivity : AppCompatActivity() {
 
 
                     parsedJson.response?.docs?.let { list ->
-                        articles.addAll(list)
+                        lifecycleScope.launch(IO) {
+                            (application as ArticleApplication).db.articleDao().deleteAll()
+                            (application as ArticleApplication).db.articleDao().insertAll(list.map {
+                                ArticleEntity(
+                                    headline = it.headline?.main,
+                                    articleAbstract = it.abstract,
+                                    byline = it.byline?.original,
+                                    mediaImageUrl = it.mediaImageUrl
+                                )
+                            })
+                        }
                     }
 
+
                     parsedJson.response?.docs?.let { list ->
-                        articles.addAll(list)
+                        //articles.addAll(list)
 
                         // Reload the screen
                         articleAdapter.notifyDataSetChanged()
